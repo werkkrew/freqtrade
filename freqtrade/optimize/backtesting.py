@@ -301,6 +301,7 @@ class Backtesting:
                     trade.close_date = sell_row[DATE_IDX]
                     trade.sell_reason = SellType.FORCE_SELL.value
                     trade.close(sell_row[OPEN_IDX], show_msg=False)
+                    LocalTrade.close_bt_trade(trade)
                     # Deepcopy object to have wallets update correctly
                     trade1 = deepcopy(trade)
                     trade1.is_open = True
@@ -377,7 +378,7 @@ class Backtesting:
                         open_trade_count += 1
                         # logger.debug(f"{pair} - Emulate creation of new trade: {trade}.")
                         open_trades[pair].append(trade)
-                        LocalTrade.trades.append(trade)
+                        LocalTrade.add_bt_trade(trade)
 
                 for trade in open_trades[pair]:
                     # also check the buying candle for sell conditions.
@@ -387,6 +388,8 @@ class Backtesting:
                         # logger.debug(f"{pair} - Backtesting sell {trade}")
                         open_trade_count -= 1
                         open_trades[pair].remove(trade)
+
+                        LocalTrade.close_bt_trade(trade)
                         trades.append(trade_entry)
                         if enable_protections:
                             self.protections.stop_per_pair(pair, row[DATE_IDX])
