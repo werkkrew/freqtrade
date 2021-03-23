@@ -706,7 +706,7 @@ def test_download_data_timerange(mocker, caplog, markets):
     start_download_data(get_args(args))
     assert dl_mock.call_count == 1
     # 20days ago
-    days_ago = arrow.get(arrow.utcnow().shift(days=-20).date()).int_timestamp
+    days_ago = arrow.get(arrow.now().shift(days=-20).date()).int_timestamp
     assert dl_mock.call_args_list[0][1]['timerange'].startts == days_ago
 
     dl_mock.reset_mock()
@@ -920,7 +920,7 @@ def test_start_test_pairlist(mocker, caplog, tickers, default_conf, capsys):
 
 def test_hyperopt_list(mocker, capsys, caplog, hyperopt_results):
     mocker.patch(
-        'freqtrade.optimize.hyperopt.Hyperopt.load_previous_results',
+        'freqtrade.optimize.hyperopt_tools.HyperoptTools.load_previous_results',
         MagicMock(return_value=hyperopt_results)
     )
 
@@ -1152,7 +1152,7 @@ def test_hyperopt_list(mocker, capsys, caplog, hyperopt_results):
 
 def test_hyperopt_show(mocker, capsys, hyperopt_results):
     mocker.patch(
-        'freqtrade.optimize.hyperopt.Hyperopt.load_previous_results',
+        'freqtrade.optimize.hyperopt_tools.HyperoptTools.load_previous_results',
         MagicMock(return_value=hyperopt_results)
     )
 
