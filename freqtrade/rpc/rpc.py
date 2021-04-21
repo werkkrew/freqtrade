@@ -31,13 +31,15 @@ logger = logging.getLogger(__name__)
 
 
 class RPCMessageType(Enum):
-    STATUS_NOTIFICATION = 'status'
-    WARNING_NOTIFICATION = 'warning'
-    STARTUP_NOTIFICATION = 'startup'
-    BUY_NOTIFICATION = 'buy'
-    BUY_CANCEL_NOTIFICATION = 'buy_cancel'
-    SELL_NOTIFICATION = 'sell'
-    SELL_CANCEL_NOTIFICATION = 'sell_cancel'
+    STATUS = 'status'
+    WARNING = 'warning'
+    STARTUP = 'startup'
+    BUY = 'buy'
+    BUY_FILL = 'buy_fill'
+    BUY_CANCEL = 'buy_cancel'
+    SELL = 'sell'
+    SELL_FILL = 'sell_fill'
+    SELL_CANCEL = 'sell_cancel'
 
     def __repr__(self):
         return self.value
@@ -167,10 +169,13 @@ class RPC:
                 if trade.open_order_id:
                     order = self._freqtrade.exchange.fetch_order(trade.open_order_id, trade.pair)
                 # calculate profit and send message to user
-                try:
-                    current_rate = self._freqtrade.get_sell_rate(trade.pair, False)
-                except (ExchangeError, PricingError):
-                    current_rate = NAN
+                if trade.is_open:
+                    try:
+                        current_rate = self._freqtrade.get_sell_rate(trade.pair, False)
+                    except (ExchangeError, PricingError):
+                        current_rate = NAN
+                else:
+                    current_rate = trade.close_rate
                 current_profit = trade.calc_profit_ratio(current_rate)
                 current_profit_abs = trade.calc_profit(current_rate)
 
@@ -442,7 +447,7 @@ class RPC:
         output = []
         total = 0.0
         try:
-            tickers = self._freqtrade.exchange.get_tickers()
+            tickers = self._freqtrade.exchange.get_tickers(cached=True)
         except (ExchangeError):
             raise RPCException('Error getting current tickers.')
 
@@ -558,7 +563,7 @@ class RPC:
                 # Execute sell for all open orders
                 for trade in Trade.get_open_trades():
                     _exec_forcesell(trade)
-                Trade.session.flush()
+                Trade.query.session.flush()
                 self._freqtrade.wallets.update()
                 return {'result': 'Created sell orders for all open trades.'}
 
@@ -571,7 +576,7 @@ class RPC:
                 raise RPCException('invalid argument')
 
             _exec_forcesell(trade)
-            Trade.session.flush()
+            Trade.query.session.flush()
             self._freqtrade.wallets.update()
             return {'result': f'Created sell order for trade {trade_id}.'}
 
@@ -696,7 +701,7 @@ class RPC:
             lock.lock_end_time = datetime.now(timezone.utc)
 
         # session is always the same
-        PairLock.session.flush()
+        PairLock.query.session.flush()
 
         return self._rpc_locks()
 

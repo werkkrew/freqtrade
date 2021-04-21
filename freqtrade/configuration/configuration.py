@@ -11,10 +11,10 @@ from freqtrade import constants
 from freqtrade.configuration.check_exchange import check_exchange
 from freqtrade.configuration.deprecated_settings import process_temporary_deprecated_settings
 from freqtrade.configuration.directory_operations import create_datadir, create_userdata_dir
-from freqtrade.configuration.load_config import load_config_file
+from freqtrade.configuration.load_config import load_config_file, load_file
 from freqtrade.exceptions import OperationalException
 from freqtrade.loggers import setup_logging
-from freqtrade.misc import deep_merge_dicts, json_load
+from freqtrade.misc import deep_merge_dicts
 from freqtrade.state import NON_UTIL_MODES, TRADING_MODES, RunMode
 
 
@@ -445,6 +445,7 @@ class Configuration:
         """
 
         if "pairs" in config:
+            config['exchange']['pair_whitelist'] = config['pairs']
             return
 
         if "pairs_file" in self.args and self.args["pairs_file"]:
@@ -454,9 +455,8 @@ class Configuration:
             # or if pairs file is specified explicitely
             if not pairs_file.exists():
                 raise OperationalException(f'No pairs file found with path "{pairs_file}".')
-            with pairs_file.open('r') as f:
-                config['pairs'] = json_load(f)
-                config['pairs'].sort()
+            config['pairs'] = load_file(pairs_file)
+            config['pairs'].sort()
             return
 
         if 'config' in self.args and self.args['config']:
@@ -466,7 +466,6 @@ class Configuration:
             # Fall back to /dl_path/pairs.json
             pairs_file = config['datadir'] / 'pairs.json'
             if pairs_file.exists():
-                with pairs_file.open('r') as f:
-                    config['pairs'] = json_load(f)
+                config['pairs'] = load_file(pairs_file)
                 if 'pairs' in config:
                     config['pairs'].sort()
