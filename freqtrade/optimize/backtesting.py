@@ -247,15 +247,17 @@ class Backtesting:
         else:
             return sell_row[OPEN_IDX]
 
-    def _get_sell_trade_entry(self, trade: LocalTrade, sell_row: Tuple) -> Optional[LocalTrade]:
+    def _get_sell_trade_entry(self, dataframe: DataFrame, trade: LocalTrade,
+                              sell_row: Tuple) -> Optional[LocalTrade]:
 
-        sell = self.strategy.should_sell(trade, sell_row[OPEN_IDX],  # type: ignore
-                                         sell_row[DATE_IDX], sell_row[BUY_IDX], sell_row[SELL_IDX],
+        sell = self.strategy.should_sell(dataframe, trade, sell_row[OPEN_IDX],  # type: ignore
+                                         sell_row[DATE_IDX].to_pydatetime(), sell_row[BUY_IDX],
+                                         sell_row[SELL_IDX],
                                          low=sell_row[LOW_IDX], high=sell_row[HIGH_IDX])
 
         if sell.sell_flag:
-            trade.close_date = sell_row[DATE_IDX]
-            trade.sell_reason = sell.sell_type.value
+            trade.close_date = sell_row[DATE_IDX].to_pydatetime()
+            trade.sell_reason = sell.sell_reason
             trade_dur = int((trade.close_date_utc - trade.open_date_utc).total_seconds() // 60)
             closerate = self._get_close_rate(sell_row, trade, sell, trade_dur)
 
@@ -265,7 +267,7 @@ class Backtesting:
                     pair=trade.pair, trade=trade, order_type='limit', amount=trade.amount,
                     rate=closerate,
                     time_in_force=time_in_force,
-                    sell_reason=sell.sell_type.value):
+                    sell_reason=sell.sell_reason):
                 return None
 
             trade.close(closerate, show_msg=False)
@@ -273,11 +275,9 @@ class Backtesting:
 
         return None
 
-    def _enter_trade(self, pair: str, row: List, max_open_trades: int,
-                     open_trade_count: int) -> Optional[LocalTrade]:
+    def _enter_trade(self, pair: str, row: List) -> Optional[LocalTrade]:
         try:
-            stake_amount = self.wallets.get_trade_stake_amount(
-                pair, max_open_trades - open_trade_count, None)
+            stake_amount = self.wallets.get_trade_stake_amount(pair, None)
         except DependencyException:
             return None
         min_stake_amount = self.exchange.get_min_pair_stake_amount(pair, row[OPEN_IDX], -0.05)
@@ -295,7 +295,7 @@ class Backtesting:
             trade = LocalTrade(
                 pair=pair,
                 open_rate=row[OPEN_IDX],
-                open_date=row[DATE_IDX],
+                open_date=row[DATE_IDX].to_pydatetime(),
                 stake_amount=stake_amount,
                 amount=round(stake_amount / row[OPEN_IDX], 8),
                 fee_open=self.fee,
@@ -317,7 +317,7 @@ class Backtesting:
                 for trade in open_trades[pair]:
                     sell_row = data[pair][-1]
 
-                    trade.close_date = sell_row[DATE_IDX]
+                    trade.close_date = sell_row[DATE_IDX].to_pydatetime()
                     trade.sell_reason = SellType.FORCE_SELL.value
                     trade.close(sell_row[OPEN_IDX], show_msg=False)
                     LocalTrade.close_bt_trade(trade)
@@ -354,7 +354,7 @@ class Backtesting:
         data: Dict = self._get_ohlcv_as_lists(processed)
 
         # Indexes per pair, so some pairs are allowed to have a missing start.
-        indexes: Dict = {}
+        indexes: Dict = defaultdict(int)
         tmp = start_date + timedelta(minutes=self.timeframe_min)
 
         open_trades: Dict[str, List[LocalTrade]] = defaultdict(list)
@@ -365,9 +365,6 @@ class Backtesting:
             open_trade_count_start = open_trade_count
 
             for i, pair in enumerate(data):
-                if pair not in indexes:
-                    indexes[pair] = 0
-
                 try:
                     row = data[pair][indexes[pair]]
                 except IndexError:
@@ -388,7 +385,7 @@ class Backtesting:
                         and tmp != end_date
                         and row[BUY_IDX] == 1 and row[SELL_IDX] != 1
                         and not PairLocks.is_pair_locked(pair, row[DATE_IDX])):
-                    trade = self._enter_trade(pair, row, max_open_trades, open_trade_count_start)
+                    trade = self._enter_trade(pair, row)
                     if trade:
                         # TODO: hacky workaround to avoid opening > max_open_trades
                         # This emulates previous behaviour - not sure if this is correct
@@ -401,7 +398,7 @@ class Backtesting:
 
                 for trade in open_trades[pair]:
                     # also check the buying candle for sell conditions.
-                    trade_entry = self._get_sell_trade_entry(trade, row)
+                    trade_entry = self._get_sell_trade_entry(processed[pair], trade, row)
                     # Sell occured
                     if trade_entry:
                         # logger.debug(f"{pair} - Backtesting sell {trade}")
@@ -478,6 +475,7 @@ class Backtesting:
         data: Dict[str, Any] = {}
 
         data, timerange = self.load_bt_data()
+        logger.info("Dataload complete. Calculating indicators")
 
         for strat in self.strategylist:
             min_date, max_date = self.backtest_one_strategy(strat, data, timerange)

@@ -21,6 +21,7 @@ from freqtrade.optimize.hyperopt_tools import HyperoptTools
 from freqtrade.optimize.space import SKDecimal
 from freqtrade.resolvers.hyperopt_resolver import HyperOptResolver
 from freqtrade.state import RunMode
+from freqtrade.strategy.hyper import IntParameter
 from tests.conftest import (get_args, log_has, log_has_re, patch_exchange,
                             patched_configuration_load_config_file)
 
@@ -1093,7 +1094,9 @@ def test_print_epoch_details(capsys):
     assert re.search(r'^\s+\"90\"\:\s0.14,\s*$', captured.out, re.MULTILINE)
 
 
-def test_in_strategy_auto_hyperopt(mocker, hyperopt_conf, tmpdir) -> None:
+def test_in_strategy_auto_hyperopt(mocker, hyperopt_conf, tmpdir, fee) -> None:
+    patch_exchange(mocker)
+    mocker.patch('freqtrade.exchange.Exchange.get_fee', fee)
     (Path(tmpdir) / 'hyperopt_results').mkdir(parents=True)
     # No hyperopt needed
     del hyperopt_conf['hyperopt']
@@ -1103,6 +1106,14 @@ def test_in_strategy_auto_hyperopt(mocker, hyperopt_conf, tmpdir) -> None:
     })
     hyperopt = Hyperopt(hyperopt_conf)
     assert isinstance(hyperopt.custom_hyperopt, HyperOptAuto)
+    assert isinstance(hyperopt.backtesting.strategy.buy_rsi, IntParameter)
+
+    assert hyperopt.backtesting.strategy.buy_rsi.hyperopt is True
+    assert hyperopt.backtesting.strategy.buy_rsi.value == 35
+    buy_rsi_range = hyperopt.backtesting.strategy.buy_rsi.range
+    assert isinstance(buy_rsi_range, range)
+    # Range from 0 - 50 (inclusive)
+    assert len(list(buy_rsi_range)) == 51
 
     hyperopt.start()
 

@@ -363,7 +363,6 @@ class Exchange:
         invalid_pairs = []
         for pair in extended_pairs:
             # Note: ccxt has BaseCurrency/QuoteCurrency format for pairs
-            # TODO: add a support for having coins in BTC/USDT format
             if self.markets and pair not in self.markets:
                 raise OperationalException(
                     f'Pair {pair} is not available on {self.name}. '
@@ -666,17 +665,6 @@ class Exchange:
         """
 
         raise OperationalException(f"stoploss is not implemented for {self.name}.")
-
-    @retrier
-    def get_balance(self, currency: str) -> float:
-
-        # ccxt exception is already handled by get_balances
-        balances = self.get_balances()
-        balance = balances.get(currency)
-        if balance is None:
-            raise TemporaryError(
-                f'Could not get {currency} balance due to malformed exchange response: {balances}')
-        return balance['free']
 
     @retrier
     def get_balances(self) -> dict:
