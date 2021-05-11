@@ -193,7 +193,7 @@ If the volatility over the last 10 days is not in the range of 0.05-0.50, remove
 
 ### Full example of Pairlist Handlers
 
-The below example blacklists `BNB/BTC`, uses `VolumePairList` with `20` assets, sorting pairs by `quoteVolume` and applies [`PrecisionFilter`](#precisionfilter) and [`PriceFilter`](#price-filter), filtering all assets where 1 price unit is > 1%. Then the [`SpreadFilter`](#spreadfilter) and [`VolatilityFilter`](#volatilityfilter) is applied and pairs are finally shuffled with the random seed set to some predefined value.
+The below example blacklists `BNB/BTC`, uses `VolumePairList` with `20` assets, sorting pairs by `quoteVolume` and applies [`PrecisionFilter`](#precisionfilter) and [`PriceFilter`](#pricefilter), filtering all assets where 1 price unit is > 1%. Then the [`SpreadFilter`](#spreadfilter) and [`VolatilityFilter`](#volatilityfilter) is applied and pairs are finally shuffled with the random seed set to some predefined value.
 
 ```json
 "exchange": {
@@ -204,7 +204,7 @@ The below example blacklists `BNB/BTC`, uses `VolumePairList` with `20` assets, 
     {
         "method": "VolumePairList",
         "number_assets": 20,
-        "sort_key": "quoteVolume",
+        "sort_key": "quoteVolume"
     },
     {"method": "AgeFilter", "min_days_listed": 10},
     {"method": "PrecisionFilter"},

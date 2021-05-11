@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pandas as pd
 import pytest
@@ -18,10 +18,12 @@ from freqtrade.exceptions import OperationalException
 from freqtrade.optimize.hyperopt import Hyperopt
 from freqtrade.optimize.hyperopt_auto import HyperOptAuto
 from freqtrade.optimize.hyperopt_tools import HyperoptTools
+from freqtrade.optimize.optimize_reports import generate_strategy_stats
 from freqtrade.optimize.space import SKDecimal
 from freqtrade.resolvers.hyperopt_resolver import HyperOptResolver
 from freqtrade.state import RunMode
 from freqtrade.strategy.hyper import IntParameter
+from freqtrade.strategy.interface import SellType
 from tests.conftest import (get_args, log_has, log_has_re, patch_exchange,
                             patched_configuration_load_config_file)
 
@@ -340,7 +342,7 @@ def test_save_results_saves_epochs(mocker, hyperopt, testdatadir, caplog) -> Non
 
 def test_read_results_returns_epochs(mocker, hyperopt, testdatadir, caplog) -> None:
     epochs = create_results(mocker, hyperopt, testdatadir)
-    mock_load = mocker.patch('freqtrade.optimize.hyperopt_tools.load', return_value=epochs)
+    mock_load = mocker.patch('joblib.load', return_value=epochs)
     results_file = testdatadir / 'optimize' / 'ut_results.pickle'
     hyperopt_epochs = HyperoptTools._read_results(results_file)
     assert log_has(f"Reading epochs from '{results_file}'", caplog)
@@ -350,7 +352,7 @@ def test_read_results_returns_epochs(mocker, hyperopt, testdatadir, caplog) -> N
 
 def test_load_previous_results(mocker, hyperopt, testdatadir, caplog) -> None:
     epochs = create_results(mocker, hyperopt, testdatadir)
-    mock_load = mocker.patch('freqtrade.optimize.hyperopt_tools.load', return_value=epochs)
+    mock_load = mocker.patch('joblib.load', return_value=epochs)
     mocker.patch.object(Path, 'is_file', MagicMock(return_value=True))
     statmock = MagicMock()
     statmock.st_size = 5
@@ -364,7 +366,7 @@ def test_load_previous_results(mocker, hyperopt, testdatadir, caplog) -> None:
     mock_load.assert_called_once()
 
     del epochs[0]['is_best']
-    mock_load = mocker.patch('freqtrade.optimize.hyperopt_tools.load', return_value=epochs)
+    mock_load = mocker.patch('joblib.load', return_value=epochs)
 
     with pytest.raises(OperationalException):
         HyperoptTools.load_previous_results(results_file)
@@ -433,18 +435,41 @@ def test_start_calls_optimizer(mocker, hyperopt_conf, capsys) -> None:
     assert hasattr(hyperopt, "position_stacking")
 
 
-def test_format_results(hyperopt):
-    # Test with BTC as stake_currency
-    trades = [
-        ('ETH/BTC', 2, 2, 123),
-        ('LTC/BTC', 1, 1, 123),
-        ('XPR/BTC', -1, -2, -246)
-    ]
-    labels = ['currency', 'profit_ratio', 'profit_abs', 'trade_duration']
-    df = pd.DataFrame.from_records(trades, columns=labels)
-    results_metrics = hyperopt._calculate_results_metrics(df)
-    results_explanation = hyperopt._format_results_explanation_string(results_metrics)
-    total_profit = results_metrics['total_profit']
+def test_hyperopt_format_results(hyperopt):
+
+    bt_result = {
+        'results': pd.DataFrame({"pair": ["UNITTEST/BTC", "UNITTEST/BTC",
+                                          "UNITTEST/BTC", "UNITTEST/BTC"],
+                                 "profit_ratio": [0.003312, 0.010801, 0.013803, 0.002780],
+                                 "profit_abs": [0.000003, 0.000011, 0.000014, 0.000003],
+                                 "open_date": [Arrow(2017, 11, 14, 19, 32, 00).datetime,
+                                               Arrow(2017, 11, 14, 21, 36, 00).datetime,
+                                               Arrow(2017, 11, 14, 22, 12, 00).datetime,
+                                               Arrow(2017, 11, 14, 22, 44, 00).datetime],
+                                 "close_date": [Arrow(2017, 11, 14, 21, 35, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 10, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 43, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 58, 00).datetime],
+                                 "open_rate": [0.002543, 0.003003, 0.003089, 0.003214],
+                                 "close_rate": [0.002546, 0.003014, 0.003103, 0.003217],
+                                 "trade_duration": [123, 34, 31, 14],
+                                 "is_open": [False, False, False, True],
+                                 "stake_amount": [0.01, 0.01, 0.01, 0.01],
+                                 "sell_reason": [SellType.ROI, SellType.STOP_LOSS,
+                                                 SellType.ROI, SellType.FORCE_SELL]
+                                 }),
+        'config': hyperopt.config,
+        'locks': [],
+        'final_balance': 0.02,
+        'backtest_start_time': 1619718665,
+        'backtest_end_time': 1619718665,
+        }
+    results_metrics = generate_strategy_stats({'XRP/BTC': None}, '', bt_result,
+                                              Arrow(2017, 11, 14, 19, 32, 00),
+                                              Arrow(2017, 12, 14, 19, 32, 00), market_change=0)
+
+    results_explanation = HyperoptTools.format_results_explanation_string(results_metrics, 'BTC')
+    total_profit = results_metrics['profit_total_abs']
 
     results = {
         'loss': 0.0,
@@ -458,21 +483,9 @@ def test_format_results(hyperopt):
     }
 
     result = HyperoptTools._format_explanation_string(results, 1)
-    assert result.find(' 66.67%')
-    assert result.find('Total profit 1.00000000 BTC')
-    assert result.find('2.0000Σ %')
-
-    # Test with EUR as stake_currency
-    trades = [
-        ('ETH/EUR', 2, 2, 123),
-        ('LTC/EUR', 1, 1, 123),
-        ('XPR/EUR', -1, -2, -246)
-    ]
-    df = pd.DataFrame.from_records(trades, columns=labels)
-    results_metrics = hyperopt._calculate_results_metrics(df)
-    results['total_profit'] = results_metrics['total_profit']
-    result = HyperoptTools._format_explanation_string(results, 1)
-    assert result.find('Total profit 1.00000000 EUR')
+    assert ' 0.71%' in result
+    assert 'Total profit  0.00003100 BTC' in result
+    assert '0:50:00 min' in result
 
 
 @pytest.mark.parametrize("spaces, expected_results", [
@@ -503,10 +516,10 @@ def test_format_results(hyperopt):
     (['default', 'buy'],
      {'buy': True, 'sell': True, 'roi': True, 'stoploss': True, 'trailing': False}),
 ])
-def test_has_space(hyperopt, spaces, expected_results):
+def test_has_space(hyperopt_conf, spaces, expected_results):
     for s in ['buy', 'sell', 'roi', 'stoploss', 'trailing']:
-        hyperopt.config.update({'spaces': spaces})
-        assert hyperopt.has_space(s) == expected_results[s]
+        hyperopt_conf.update({'spaces': spaces})
+        assert HyperoptTools.has_space(hyperopt_conf, s) == expected_results[s]
 
 
 def test_populate_indicators(hyperopt, testdatadir) -> None:
@@ -577,22 +590,37 @@ def test_generate_optimizer(mocker, hyperopt_conf) -> None:
                           'hyperopt_min_trades': 1,
                           })
 
-    trades = [
-        ('TRX/BTC', 0.023117, 0.000233, 100)
-    ]
-    labels = ['currency', 'profit_ratio', 'profit_abs', 'trade_duration']
-    backtest_result = pd.DataFrame.from_records(trades, columns=labels)
+    backtest_result = {
+        'results': pd.DataFrame({"pair": ["UNITTEST/BTC", "UNITTEST/BTC",
+                                          "UNITTEST/BTC", "UNITTEST/BTC"],
+                                 "profit_ratio": [0.003312, 0.010801, 0.013803, 0.002780],
+                                 "profit_abs": [0.000003, 0.000011, 0.000014, 0.000003],
+                                 "open_date": [Arrow(2017, 11, 14, 19, 32, 00).datetime,
+                                               Arrow(2017, 11, 14, 21, 36, 00).datetime,
+                                               Arrow(2017, 11, 14, 22, 12, 00).datetime,
+                                               Arrow(2017, 11, 14, 22, 44, 00).datetime],
+                                 "close_date": [Arrow(2017, 11, 14, 21, 35, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 10, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 43, 00).datetime,
+                                                Arrow(2017, 11, 14, 22, 58, 00).datetime],
+                                 "open_rate": [0.002543, 0.003003, 0.003089, 0.003214],
+                                 "close_rate": [0.002546, 0.003014, 0.003103, 0.003217],
+                                 "trade_duration": [123, 34, 31, 14],
+                                 "is_open": [False, False, False, True],
+                                 "stake_amount": [0.01, 0.01, 0.01, 0.01],
+                                 "sell_reason": [SellType.ROI, SellType.STOP_LOSS,
+                                                 SellType.ROI, SellType.FORCE_SELL]
+                                 }),
+        'config': hyperopt_conf,
+        'locks': [],
+        'final_balance': 1000,
+    }
 
-    mocker.patch(
-        'freqtrade.optimize.hyperopt.Backtesting.backtest',
-        MagicMock(return_value=backtest_result)
-    )
-    mocker.patch(
-        'freqtrade.optimize.hyperopt.get_timerange',
-        MagicMock(return_value=(Arrow(2017, 12, 10), Arrow(2017, 12, 13)))
-    )
+    mocker.patch('freqtrade.optimize.hyperopt.Backtesting.backtest', return_value=backtest_result)
+    mocker.patch('freqtrade.optimize.hyperopt.get_timerange',
+                 return_value=(Arrow(2017, 12, 10), Arrow(2017, 12, 13)))
     patch_exchange(mocker)
-    mocker.patch('freqtrade.optimize.hyperopt.load', MagicMock())
+    mocker.patch('freqtrade.optimize.hyperopt.load', return_value={'XRP/BTC': None})
 
     optimizer_param = {
         'adx-value': 0,
@@ -626,11 +654,11 @@ def test_generate_optimizer(mocker, hyperopt_conf) -> None:
         'trailing_only_offset_is_reached': False,
     }
     response_expected = {
-        'loss': 1.9840569076926293,
-        'results_explanation': ('     1 trades. 1/0/0 Wins/Draws/Losses. '
-                                'Avg profit   2.31%. Median profit   2.31%. Total profit  '
-                                '0.00023300 BTC (   2.31\N{GREEK CAPITAL LETTER SIGMA}%). '
-                                'Avg duration 100.0 min.'
+        'loss': 1.9147239021396234,
+        'results_explanation': ('     4 trades. 4/0/0 Wins/Draws/Losses. '
+                                'Avg profit   0.77%. Median profit   0.71%. Total profit  '
+                                '0.00003100 BTC (   0.00\N{GREEK CAPITAL LETTER SIGMA}%). '
+                                'Avg duration 0:50:00 min.'
                                 ).encode(locale.getpreferredencoding(), 'replace').decode('utf-8'),
         'params_details': {'buy': {'adx-enabled': False,
                                    'adx-value': 0,
@@ -660,21 +688,16 @@ def test_generate_optimizer(mocker, hyperopt_conf) -> None:
                                         'trailing_stop_positive': 0.02,
                                         'trailing_stop_positive_offset': 0.07}},
         'params_dict': optimizer_param,
-        'results_metrics': {'avg_profit': 2.3117,
-                            'draws': 0,
-                            'duration': 100.0,
-                            'losses': 0,
-                            'winsdrawslosses': '   1    0    0',
-                            'median_profit': 2.3117,
-                            'profit': 2.3117,
-                            'total_profit': 0.000233,
-                            'trade_count': 1,
-                            'wins': 1},
-        'total_profit': 0.00023300
+        'params_not_optimized': {'buy': {}, 'sell': {}},
+        'results_metrics': ANY,
+        'total_profit': 3.1e-08
     }
 
     hyperopt = Hyperopt(hyperopt_conf)
-    hyperopt.dimensions = hyperopt.hyperopt_space()
+    hyperopt.min_date = Arrow(2017, 12, 10)
+    hyperopt.max_date = Arrow(2017, 12, 13)
+    hyperopt.init_spaces()
+    hyperopt.dimensions = hyperopt.dimensions
     generate_optimizer_value = hyperopt.generate_optimizer(list(optimizer_param.values()))
     assert generate_optimizer_value == response_expected
 
@@ -1108,7 +1131,7 @@ def test_in_strategy_auto_hyperopt(mocker, hyperopt_conf, tmpdir, fee) -> None:
     assert isinstance(hyperopt.custom_hyperopt, HyperOptAuto)
     assert isinstance(hyperopt.backtesting.strategy.buy_rsi, IntParameter)
 
-    assert hyperopt.backtesting.strategy.buy_rsi.hyperopt is True
+    assert hyperopt.backtesting.strategy.buy_rsi.in_space is True
     assert hyperopt.backtesting.strategy.buy_rsi.value == 35
     buy_rsi_range = hyperopt.backtesting.strategy.buy_rsi.range
     assert isinstance(buy_rsi_range, range)
@@ -1133,3 +1156,17 @@ def test_SKDecimal():
     assert space.transform([2.0]) == [200]
     assert space.transform([1.0]) == [100]
     assert space.transform([1.5, 1.6]) == [150, 160]
+
+
+def test___pprint():
+    params = {'buy_std': 1.2, 'buy_rsi': 31, 'buy_enable': True, 'buy_what': 'asdf'}
+    non_params = {'buy_notoptimied': 55}
+
+    x = HyperoptTools._pprint(params, non_params)
+    assert x == """{
+    "buy_std": 1.2,
+    "buy_rsi": 31,
+    "buy_enable": True,
+    "buy_what": "asdf",
+    "buy_notoptimied": 55,  # value loaded from strategy
+}"""
